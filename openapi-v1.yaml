@@ -1,0 +1,1087 @@
+openapi: 3.1.0
+info:
+  title: E-Summit '27 Mobile API
+  version: 1.0.0
+  description: >
+    Official Mobile API specification (v1) for the E-Summit '27 React Native + Expo mobile application.
+    Provides authentication (Google OAuth ID token and Email OTP), user profile retrieval,
+    event discovery, event registration, and administrative observability endpoints.
+  contact:
+    name: E-Cell MNIT Technical Team
+    url: https://esummit.ecellmnit.org
+
+servers:
+  - url: https://api.esummit.ecellmnit.org/api/v1
+    description: Production API Server
+  - url: https://api-dev.esummit.ecellmnit.org/api/v1
+    description: Staging / Development API Server
+  - url: http://localhost:4000/api/v1
+    description: Local Express API Development Server
+
+security: []
+
+paths:
+  # ============================================================================
+  # Authentication Endpoints
+  # ============================================================================
+  /auth/google:
+    post:
+      summary: Authenticate with Google ID Token
+      description: >
+        Authenticates a user via a Google OpenID Connect ID token generated on the mobile device.
+        Verifies the signature, validates audience (`aud`), verifies that `email_verified` is true,
+        links or creates the user and account records, and issues access and refresh tokens.
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - idToken
+              properties:
+                idToken:
+                  type: string
+                  description: Raw Google OpenID Connect JWT ID token.
+                  example: "eyJhbGciOiJSUzI1NiIsImtpZCI6..."
+      responses:
+        "200":
+          description: Successfully authenticated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSuccessResponse"
+        "400":
+          description: Missing or malformed ID token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "401":
+          description: Invalid token signature, untrusted audience, or unverified email.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "429":
+          description: Rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+  /auth/otp/send:
+    post:
+      summary: Send One-Time Password to Email
+      description: >
+        Dispatches a 6-digit numeric OTP to the specified email address via AWS SES.
+        Always returns a generic success response to prevent email enumeration.
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: Lowercase recipient email address.
+                  example: "student@mnit.ac.in"
+      responses:
+        "200":
+          description: OTP dispatched successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                  - meta
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    required:
+                      - message
+                      - expiresInSeconds
+                      - resendAfterSeconds
+                    properties:
+                      message:
+                        type: string
+                        example: "If the email is valid, a 6-digit verification code has been dispatched."
+                      expiresInSeconds:
+                        type: integer
+                        example: 300
+                      resendAfterSeconds:
+                        type: integer
+                        example: 60
+                  meta:
+                    $ref: "#/components/schemas/ResponseMeta"
+        "400":
+          description: Invalid email format.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "429":
+          description: Rate limit exceeded (too many OTP requests).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+  /auth/otp/verify:
+    post:
+      summary: Verify Email One-Time Password
+      description: >
+        Validates the 6-digit numeric OTP. On success, sets `emailVerified` on the user,
+        consumes the OTP, and returns access and refresh tokens.
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - otp
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: "student@mnit.ac.in"
+                otp:
+                  type: string
+                  pattern: "^[0-9]{6}$"
+                  description: 6-digit numeric code.
+                  example: "492817"
+      responses:
+        "200":
+          description: OTP verified successfully.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSuccessResponse"
+        "400":
+          description: Malformed email or non-6-digit OTP code.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "401":
+          description: Incorrect, expired, or maximum attempts exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "429":
+          description: Attempt limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+  /auth/token/refresh:
+    post:
+      summary: Refresh Access Token
+      description: >
+        Exchanges an active refresh token for a new short-lived access token (15m) and a
+        rotated refresh token. Implements replay detection to revoke compromised token families.
+      tags:
+        - Authentication
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+                  example: "rf_7a8b9c0d1e2f3a4b5c6d7e8f"
+      responses:
+        "200":
+          description: Tokens refreshed successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                  - meta
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: "#/components/schemas/AuthTokens"
+                  meta:
+                    $ref: "#/components/schemas/ResponseMeta"
+        "400":
+          description: Missing refresh token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "401":
+          description: Refresh token invalid, expired, or revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+  /auth/logout:
+    post:
+      summary: Revoke Mobile Session
+      description: Invalidate the refresh token and terminate the active mobile session.
+      tags:
+        - Authentication
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+                  example: "rf_9f8e7d6c5b4a3f2e1d0c9b8a"
+      responses:
+        "200":
+          description: Successfully logged out.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                  - meta
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    required:
+                      - message
+                    properties:
+                      message:
+                        type: string
+                        example: "Successfully logged out. Session invalidated."
+                  meta:
+                    $ref: "#/components/schemas/ResponseMeta"
+        "401":
+          description: Missing or invalid authorization token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+  # ============================================================================
+  # User Endpoints
+  # ============================================================================
+  /users/me:
+    get:
+      summary: Get Current User Profile
+      description: Returns profile, contact, role, and onboarding information for the authenticated user.
+      tags:
+        - Users
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: User profile retrieved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                  - meta
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: "#/components/schemas/User"
+                  meta:
+                    $ref: "#/components/schemas/ResponseMeta"
+        "401":
+          description: Missing or expired token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "404":
+          description: User record not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+  # ============================================================================
+  # Event Endpoints
+  # ============================================================================
+  /events:
+    get:
+      summary: List Public Events
+      description: Returns a paginated list of public E-Summit events with registration status.
+      tags:
+        - Events
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/RegistrationStatus"
+          description: Filter by registration status.
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: Page number (1-indexed).
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+            maximum: 50
+          description: Number of events per page.
+      responses:
+        "200":
+          description: List of events retrieved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                  - meta
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    required:
+                      - events
+                      - pagination
+                    properties:
+                      events:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Event"
+                      pagination:
+                        $ref: "#/components/schemas/Pagination"
+                  meta:
+                    $ref: "#/components/schemas/ResponseMeta"
+
+  /events/{slug}:
+    get:
+      summary: Get Single Event Details
+      description: Returns full details for an event identified by its unique slug.
+      tags:
+        - Events
+      security:
+        - BearerAuth: []
+        - {}
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Unique event slug identifier.
+          example: "hackathon-2027"
+      responses:
+        "200":
+          description: Event details retrieved.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                  - meta
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    $ref: "#/components/schemas/Event"
+                  meta:
+                    $ref: "#/components/schemas/ResponseMeta"
+        "404":
+          description: Event slug not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+  /events/{slug}/register:
+    post:
+      summary: Register for an Event
+      description: >
+        Registers the authenticated user for the event. Enforces registration state,
+        capacity limits, date windows, and duplicate checks.
+      tags:
+        - Events
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "hackathon-2027"
+      responses:
+        "201":
+          description: Successfully registered for event.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                  - meta
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    required:
+                      - registration
+                      - event
+                    properties:
+                      registration:
+                        $ref: "#/components/schemas/EventRegistration"
+                      event:
+                        type: object
+                        required:
+                          - title
+                          - slug
+                        properties:
+                          title:
+                            type: string
+                            example: "Hackathon 2027"
+                          slug:
+                            type: string
+                            example: "hackathon-2027"
+                  meta:
+                    $ref: "#/components/schemas/ResponseMeta"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "403":
+          description: Onboarding required before event registration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "404":
+          description: Event slug not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "409":
+          description: Duplicate registration, event capacity reached, or registration closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "429":
+          description: Registration attempt rate limit exceeded.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+  /events/{slug}/registration:
+    get:
+      summary: Check User Registration Status
+      description: Checks whether the authenticated user is registered for the specified event.
+      tags:
+        - Events
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "hackathon-2027"
+      responses:
+        "200":
+          description: Registration status returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - success
+                  - data
+                  - meta
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  data:
+                    type: object
+                    required:
+                      - isRegistered
+                      - registration
+                    properties:
+                      isRegistered:
+                        type: boolean
+                        example: true
+                      registration:
+                        anyOf:
+                          - $ref: "#/components/schemas/EventRegistration"
+                          - type: "null"
+                  meta:
+                    $ref: "#/components/schemas/ResponseMeta"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "404":
+          description: Event slug not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+  # ============================================================================
+  # Admin Observability Endpoint
+  # ============================================================================
+  /admin/events/{slug}/registrations:
+    get:
+      summary: Get Event Registrations & Participant Records (Admin Only)
+      description: >
+        Returns participant details and registration counts for the event.
+        Requires `ADMIN` or `EDITOR` role. Sensitive fields like `passwordHash` are excluded.
+      tags:
+        - Admin
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+          example: "hackathon-2027"
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Filter participants by name or email substring.
+      responses:
+        "200":
+          description: Participant list and registration metrics returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRegistrationsResponse"
+        "401":
+          description: Authentication required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "403":
+          description: Forbidden - caller does not possess EDITOR or ADMIN role.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+        "404":
+          description: Event slug not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnvelopeError"
+
+# ==============================================================================
+# Components & Schemas
+# ==============================================================================
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Short-lived access token passed as `Authorization: Bearer <access_token>`."
+
+  schemas:
+    ResponseMeta:
+      type: object
+      required:
+        - timestamp
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-10-17T12:00:00.000Z"
+
+    ErrorObject:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: "VALIDATION_ERROR"
+        message:
+          type: string
+          example: "Request payload failed validation."
+        details:
+          type: object
+          additionalProperties: true
+          example:
+            field: "email"
+            issue: "Invalid email address format"
+
+    EnvelopeError:
+      type: object
+      required:
+        - success
+        - error
+        - meta
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          $ref: "#/components/schemas/ErrorObject"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+
+    Role:
+      type: string
+      enum:
+        - STUDENT
+        - EDITOR
+        - ADMIN
+      description: User access tier.
+
+    RegistrationStatus:
+      type: string
+      enum:
+        - NOT_STARTED
+        - OPEN
+        - CLOSED
+      description: Current registration phase for an event.
+
+    AuthTokens:
+      type: object
+      required:
+        - accessToken
+        - expiresIn
+        - tokenType
+        - refreshToken
+      properties:
+        accessToken:
+          type: string
+          description: JWT bearer token.
+          example: "eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+        expiresIn:
+          type: integer
+          description: Access token lifetime in seconds (900s = 15m).
+          example: 900
+        tokenType:
+          type: string
+          example: "Bearer"
+        refreshToken:
+          type: string
+          description: Long-lived opaque refresh token.
+          example: "rf_7a8b9c0d1e2f3a4b5c6d7e8f"
+
+    UserSummary:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - role
+        - onboardingCompleted
+      properties:
+        id:
+          type: string
+          example: "cm2u12345000008l0h9abcdef"
+        name:
+          type: string
+          example: "Jane Doe"
+        email:
+          type: string
+          format: email
+          example: "janedoe@gmail.com"
+        profilePhotoUrl:
+          type: string
+          nullable: true
+          example: "https://lh3.googleusercontent.com/a/..."
+        role:
+          $ref: "#/components/schemas/Role"
+        onboardingCompleted:
+          type: boolean
+          example: false
+
+    User:
+      type: object
+      required:
+        - id
+        - name
+        - email
+        - role
+        - onboardingCompleted
+        - promotionalEmailsOptIn
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          example: "cm2u12345000008l0h9abcdef"
+        name:
+          type: string
+          example: "Alex Sharma"
+        email:
+          type: string
+          format: email
+          example: "student@mnit.ac.in"
+        emailVerified:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-10-17T11:45:00.000Z"
+        role:
+          $ref: "#/components/schemas/Role"
+        gender:
+          type: string
+          nullable: true
+          example: "MALE"
+        phoneNumber:
+          type: string
+          nullable: true
+          example: "+919876543210"
+        branch:
+          type: string
+          nullable: true
+          description: College or Department name from onboarding.
+          example: "Computer Science and Engineering"
+        year:
+          type: integer
+          nullable: true
+          description: Age or Academic year from onboarding.
+          example: 3
+        hostelOrDayScholar:
+          type: string
+          nullable: true
+          example: "HOSTELER"
+        profilePhotoUrl:
+          type: string
+          nullable: true
+          example: "https://d1234abcdef8.cloudfront.net/profile-photos/cm2u12345/avatar.webp"
+        onboardingCompleted:
+          type: boolean
+          example: true
+        promotionalEmailsOptIn:
+          type: boolean
+          example: true
+        createdAt:
+          type: string
+          format: date-time
+          example: "2026-10-10T08:00:00.000Z"
+        updatedAt:
+          type: string
+          format: date-time
+          example: "2026-10-17T11:45:00.000Z"
+
+    AuthSuccessResponse:
+      type: object
+      required:
+        - success
+        - data
+        - meta
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          required:
+            - user
+            - tokens
+          properties:
+            user:
+              $ref: "#/components/schemas/UserSummary"
+            tokens:
+              $ref: "#/components/schemas/AuthTokens"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
+
+    Event:
+      type: object
+      required:
+        - id
+        - title
+        - slug
+        - description
+        - date
+        - location
+        - registrationEnabled
+        - registrationStatus
+      properties:
+        id:
+          type: string
+          example: "cm2evt111000008l0h9abcdef"
+        title:
+          type: string
+          example: "Hackathon 2027"
+        slug:
+          type: string
+          example: "hackathon-2027"
+        description:
+          type: string
+          example: "36-hour flagship hackathon of E-Summit '27."
+        date:
+          type: string
+          format: date-time
+          example: "2027-02-14T09:00:00.000Z"
+        location:
+          type: string
+          example: "Central Lawn, MNIT Jaipur"
+        bannerImageUrl:
+          type: string
+          nullable: true
+          example: "https://d1234abcdef8.cloudfront.net/events/hackathon.webp"
+        registrationEnabled:
+          type: boolean
+          example: true
+        registrationStatus:
+          $ref: "#/components/schemas/RegistrationStatus"
+        registrationOpensAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2026-12-01T00:00:00.000Z"
+        registrationClosesAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2027-02-10T23:59:59.000Z"
+        capacity:
+          type: integer
+          nullable: true
+          example: 300
+        registeredCount:
+          type: integer
+          example: 142
+        isRegistered:
+          type: boolean
+          example: false
+
+    EventRegistration:
+      type: object
+      required:
+        - id
+        - registeredAt
+      properties:
+        id:
+          type: string
+          example: "cm2reg999000008l0h9abcdef"
+        eventId:
+          type: string
+          example: "cm2evt111000008l0h9abcdef"
+        userId:
+          type: string
+          example: "cm2u12345000008l0h9abcdef"
+        registeredAt:
+          type: string
+          format: date-time
+          example: "2026-10-17T12:05:00.000Z"
+
+    Pagination:
+      type: object
+      required:
+        - page
+        - limit
+        - totalItems
+        - totalPages
+        - hasNextPage
+      properties:
+        page:
+          type: integer
+          example: 1
+        limit:
+          type: integer
+          example: 20
+        totalItems:
+          type: integer
+          example: 1
+        totalPages:
+          type: integer
+          example: 1
+        hasNextPage:
+          type: boolean
+          example: false
+
+    AdminRegistrationsResponse:
+      type: object
+      required:
+        - success
+        - data
+        - meta
+      properties:
+        success:
+          type: boolean
+          example: true
+        data:
+          type: object
+          required:
+            - event
+            - participants
+            - pagination
+          properties:
+            event:
+              type: object
+              required:
+                - id
+                - title
+                - slug
+                - totalRegistrations
+              properties:
+                id:
+                  type: string
+                  example: "cm2evt111000008l0h9abcdef"
+                title:
+                  type: string
+                  example: "Hackathon 2027"
+                slug:
+                  type: string
+                  example: "hackathon-2027"
+                capacity:
+                  type: integer
+                  nullable: true
+                  example: 300
+                totalRegistrations:
+                  type: integer
+                  example: 142
+                remainingCapacity:
+                  type: integer
+                  nullable: true
+                  example: 158
+            participants:
+              type: array
+              items:
+                type: object
+                required:
+                  - registrationId
+                  - registeredAt
+                  - user
+                properties:
+                  registrationId:
+                    type: string
+                    example: "cm2reg999000008l0h9abcdef"
+                  registeredAt:
+                    type: string
+                    format: date-time
+                    example: "2026-10-17T12:05:00.000Z"
+                  user:
+                    type: object
+                    required:
+                      - id
+                      - name
+                      - email
+                    properties:
+                      id:
+                        type: string
+                        example: "cm2u12345000008l0h9abcdef"
+                      name:
+                        type: string
+                        example: "Alex Sharma"
+                      email:
+                        type: string
+                        format: email
+                        example: "student@mnit.ac.in"
+                      phoneNumber:
+                        type: string
+                        nullable: true
+                        example: "+919876543210"
+                      branch:
+                        type: string
+                        nullable: true
+                        example: "Computer Science and Engineering"
+                      year:
+                        type: integer
+                        nullable: true
+                        example: 3
+                      hostelOrDayScholar:
+                        type: string
+                        nullable: true
+                        example: "HOSTELER"
+            pagination:
+              $ref: "#/components/schemas/Pagination"
+        meta:
+          $ref: "#/components/schemas/ResponseMeta"
