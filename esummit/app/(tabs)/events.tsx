@@ -1,63 +1,110 @@
 /**
- * Events tab — SDUI placeholder.
- * Phase 5 will replace this with the event list + SDUI header + filters.
- * Guest browsing allowed.
+ * Events tab — search, day + category filters, square card grid.
  */
 
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { Screen } from '../../src/components';
-import { colors, typography, spacing } from '../../src/theme';
-import { Calendar } from 'lucide-react-native';
+import React, { useMemo, useState } from 'react';
+import { FlatList, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Search } from 'lucide-react-native';
+import { Chip, EventCard, Header, Input, Screen } from '../../src/components';
+import { events, summit } from '../../src/data/placeholder';
+import type { EventCategory } from '../../src/data/types';
+import {
+  colors,
+  fontFamily,
+  fontSize,
+  screenPadding,
+  spacing,
+  tabBarClearance,
+} from '../../src/theme';
+
+const CATEGORIES: EventCategory[] = ['Competition', 'Talk', 'Workshop', 'Networking', 'Showcase'];
+const GAP = spacing['3'];
 
 export default function EventsScreen(): React.JSX.Element {
-  return (
-    <Screen>
-      <View style={styles.container}>
-        <Calendar size={48} color={colors.primary} strokeWidth={1.5} />
-        <Text style={styles.title}>Events</Text>
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>PHASE 5 — EVENT LIST + DETAIL</Text>
-        </View>
-        <Text style={styles.note}>
-          Browse events by day and category, view details, register, and add to calendar.
-          {'\n\n'}Will use SDUI header + native list with register action.
-        </Text>
+  const { width } = useWindowDimensions();
+  const [query, setQuery] = useState('');
+  const [day, setDay] = useState<number | null>(null);
+  const [category, setCategory] = useState<EventCategory | null>(null);
+
+  const cardSize = (width - screenPadding * 2 - GAP) / 2;
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return events.filter(
+      (e) =>
+        (day === null || e.day === day) &&
+        (category === null || e.category === category) &&
+        (q === '' || e.name.toLowerCase().includes(q) || e.venue.toLowerCase().includes(q)),
+    );
+  }, [query, day, category]);
+
+  const header = (
+    <View>
+      <Header title="Events" subtitle={summit.datesLabel} />
+      <View style={styles.filters}>
+        <Input
+          placeholder="Search events or venues"
+          value={query}
+          onChangeText={setQuery}
+          leftIcon={<Search size={18} color={colors.textMuted} strokeWidth={1.75} />}
+          returnKeyType="search"
+          containerStyle={styles.search}
+        />
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          <Chip label="All days" selected={day === null} onPress={() => setDay(null)} />
+          {summit.days.map((d) => (
+            <Chip
+              key={d.day}
+              label={d.label}
+              selected={day === d.day}
+              onPress={() => setDay(d.day)}
+            />
+          ))}
+        </ScrollView>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
+          <Chip label="All" selected={category === null} onPress={() => setCategory(null)} />
+          {CATEGORIES.map((c) => (
+            <Chip
+              key={c}
+              label={c}
+              selected={category === c}
+              onPress={() => setCategory(category === c ? null : c)}
+            />
+          ))}
+        </ScrollView>
       </View>
+    </View>
+  );
+
+  return (
+    <Screen edges={['top']}>
+      <FlatList
+        data={filtered}
+        keyExtractor={(e) => e.id}
+        numColumns={2}
+        ListHeaderComponent={header}
+        renderItem={({ item }) => <EventCard event={item} size={cardSize} />}
+        columnWrapperStyle={styles.row}
+        contentContainerStyle={styles.list}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        ListEmptyComponent={<Text style={styles.empty}>No events match these filters.</Text>}
+      />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex:           1,
-    alignItems:     'center',
-    justifyContent: 'center',
-    padding:        spacing['8'],
-    gap:            spacing['4'],
-  },
-  title: {
-    fontFamily:    typography.fontFamilyBold,
-    fontSize:      typography.size3xl,
-    color:         colors.textPrimary,
-  },
-  badge: {
-    backgroundColor: colors.primaryLight,
-    paddingHorizontal: spacing['4'],
-    paddingVertical:   spacing['1'],
-    borderRadius:      4,
-  },
-  badgeText: {
-    fontFamily:    typography.fontFamilySemiBold,
-    fontSize:      typography.size3xs,
-    color:         colors.primary,
-    letterSpacing: typography.trackingWidest,
-  },
-  note: {
-    fontFamily:  typography.fontFamilyRegular,
-    fontSize:    typography.sizeSm,
-    color:       colors.textTertiary,
-    textAlign:   'center',
-    lineHeight:  typography.sizeSm * typography.lineHeightRelaxed,
+  list: { paddingBottom: tabBarClearance },
+  filters: { gap: spacing['3'], marginBottom: spacing['4'] },
+  search: { marginHorizontal: screenPadding },
+  chips: { gap: spacing['2'], paddingHorizontal: screenPadding },
+  row: { gap: GAP, paddingHorizontal: screenPadding, marginBottom: GAP },
+  empty: {
+    fontFamily: fontFamily.body,
+    fontSize: fontSize.base,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing['10'],
   },
 });

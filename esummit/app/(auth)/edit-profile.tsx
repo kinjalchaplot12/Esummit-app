@@ -221,7 +221,7 @@ export default function ProfileScreen(): React.JSX.Element {
       {/* Top Bar with Back Button */}
       <View style={styles.topBar}>
         <TouchableOpacity
-          onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)/more')}
+          onPress={() => router.canGoBack() ? router.back() : router.replace('/(tabs)/profile')}
           style={styles.backButton}
           accessibilityRole="button"
           accessibilityLabel="Go back"

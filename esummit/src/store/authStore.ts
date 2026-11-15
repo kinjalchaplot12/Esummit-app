@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import type { User, UserSummary } from '../lib/schemas';
 import { saveToken, saveTokens, clearTokens } from '../lib/secureStorage';
 import { onUnauthorized } from '../api/client';
+import { authService } from '../features/auth/authService';
 
 interface AuthState {
   user: User | null;
@@ -57,7 +58,7 @@ export const useAuthStore = create<AuthState>((set) => {
     },
 
     logout: async () => {
-      await clearTokens();
+      await Promise.all([clearTokens(), authService.logout().catch(() => undefined)]);
       set({ user: null });
     },
 

@@ -8,7 +8,7 @@
  * - forgot-password: Password reset link dispatch
  * - verify-pending: Pending email verification notice & refetch
  * - onboarding: First-time profile details entry
- * - profile: Native profile management (edit fields, photo, notifications, logout, delete)
+ * - edit-profile: Native profile management (edit fields, photo, notifications, logout, delete)
  */
 
 import React from 'react';
@@ -30,7 +30,7 @@ export default function AuthLayout(): React.JSX.Element {
       <Stack.Screen name="forgot-password" options={{ headerShown: false }} />
       <Stack.Screen name="verify-pending"  options={{ headerShown: false }} />
       <Stack.Screen name="onboarding"      options={{ headerShown: false, gestureEnabled: false }} />
-      <Stack.Screen name="profile"         options={{ headerShown: false }} />
+      <Stack.Screen name="edit-profile"    options={{ headerShown: false }} />
     </Stack>
   );
 }

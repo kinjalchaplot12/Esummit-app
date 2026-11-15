@@ -17,7 +17,7 @@ import {
   Animated,
 } from 'react-native';
 import { Eye, EyeOff } from 'lucide-react-native';
-import { colors, typography, spacing, radii } from '../theme';
+import { colors, typography, spacing, radius } from '../theme';
 
 interface TextFieldProps extends Omit<TextInputProps, 'style'> {
   label:        string;
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     flexDirection:   'row',
     alignItems:      'center',
     backgroundColor: colors.surfaceElevated,
-    borderRadius:    radii.md,
+    borderRadius:    radius.input,
     borderWidth:     1.5,
     paddingHorizontal: spacing['4'],
     height:          52,
